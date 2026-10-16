@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import time
 import asyncio
+import math
 from collections.abc import Iterable
 from typing import Any
 
@@ -30,11 +31,33 @@ class HumanTyper:
     like Playwright, Selenium, or Appium.
     """
 
-    def __init__(self, wpm: float = 60.0, layout: str = "qwerty") -> None:
+    def __init__(self, wpm: float = 60.0, layout: str = "qwerty", *, key_hold_ms: float = 50.0) -> None:
         if not isinstance(wpm, (int, float)) or wpm <= 0:
             raise ValueError("wpm must be a positive number")
         self.wpm = wpm
         self.layout = layout
+        if not isinstance(key_hold_ms, (int, float)) or not math.isfinite(key_hold_ms) or key_hold_ms < 0:
+            raise ValueError("key_hold_ms must be a finite non-negative number")
+        # Playwright only: an explicit, configurable dwell time, not a detector bypass.
+        self.key_hold_ms = key_hold_ms
+
+    def _playwright_events(self, text: str):
+        last_time = 0.0
+        previous_hold = 0.0
+        for t, action, _ in _typing_history(text, self.wpm, self.layout):
+            if "BACKSPACE" in action:
+                keys = ["Backspace"]
+            elif "TYPED" in action:
+                keys = list(_extract_char(action))
+            else:
+                continue
+            # New histories have one character per event. Split legacy grouped
+            # events evenly, since their individual timestamps are unavailable.
+            interval = (t - last_time) / len(keys)
+            for key in keys:
+                yield max(0.0, interval - previous_hold), key
+                previous_hold = self.key_hold_ms / 1000.0
+            last_time = t
 
     async def type(self, page_element: Any, text: str) -> None:
         """
@@ -56,25 +79,10 @@ class HumanTyper:
             await input_box.click()
             await typer.type(input_box, "Hello world!")
         """
-        last_time = 0.0
-
-        for t, action, _ in _typing_history(text, self.wpm, self.layout):
-            delay = t - last_time
+        for delay, key in self._playwright_events(text):
             if delay > 0:
                 await asyncio.sleep(delay)
-            last_time = t
-
-            if "BACKSPACE" in action:
-                await page_element.press("Backspace")
-            elif "TYPED_SWAP" in action:
-                for char in _extract_char(action):
-                    await page_element.press(char)
-            elif "TYPED_ERROR" in action:
-                char = _extract_char(action)
-                await page_element.press(char)
-            elif "TYPED" in action:
-                char = _extract_char(action)
-                await page_element.press(char)
+            await page_element.press(key, delay=self.key_hold_ms)
 
     def type_appium(self, driver: Any, text: str) -> None:
         """
@@ -137,26 +145,10 @@ class HumanTyper:
         self._type_selenium_sync(element, text)
 
     def _type_playwright_sync(self, page_element: Any, text: str) -> None:
-        history = _typing_history(text, self.wpm, self.layout)
-        last_time = 0.0
-
-        for t, action, _ in history:
-            delay = t - last_time
+        for delay, key in self._playwright_events(text):
             if delay > 0:
                 time.sleep(delay)
-            last_time = t
-
-            if "BACKSPACE" in action:
-                page_element.press("Backspace")
-            elif "TYPED_SWAP" in action:
-                for char in _extract_char(action):
-                    page_element.press(char)
-            elif "TYPED_ERROR" in action:
-                char = _extract_char(action)
-                page_element.press(char)
-            elif "TYPED" in action:
-                char = _extract_char(action)
-                page_element.press(char)
+            page_element.press(key, delay=self.key_hold_ms)
 
     def _type_selenium_sync(self, selenium_element: Any, text: str) -> None:
         history = _typing_history(text, self.wpm, self.layout)

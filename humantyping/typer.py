@@ -205,6 +205,10 @@ class MarkovTyper:
                     dt1 = self._calculate_keystroke_time(char_after)
                     self.state.total_time += dt1
                     self.state.current_text += char_after
+                    self.state.last_char_typed = char_after
+                    self.state.history.append((
+                        self.state.total_time, f"TYPED_SWAP '{char_after}'", self.state.current_text
+                    ))
 
                     # Then type the intended character (producing a real swap)
                     dt2 = self._calculate_keystroke_time(char_intended)
@@ -212,7 +216,7 @@ class MarkovTyper:
                     self.state.current_text += char_intended
 
                     self.state.last_char_typed = char_intended
-                    event = (self.state.total_time, f"TYPED_SWAP '{char_after}{char_intended}'", self.state.current_text)
+                    event = (self.state.total_time, f"TYPED_SWAP_CONTINUED '{char_intended}'", self.state.current_text)
                     self.state.history.append(event)
                     self.state.mental_cursor_pos += 2
                     return event
