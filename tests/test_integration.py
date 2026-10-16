@@ -24,7 +24,7 @@ class FakePlaywrightElement:
     def __init__(self) -> None:
         self.pressed: list[str] = []
 
-    def press(self, key: str) -> None:
+    def press(self, key: str, *, delay: float = 0) -> None:
         self.pressed.append(key)
 
 
